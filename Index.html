@@ -1,0 +1,463 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  LayoutDashboard, 
+  Wallet, 
+  ArrowRightLeft, 
+  Tags, 
+  Plus, 
+  TrendingUp, 
+  TrendingDown, 
+  Filter,
+  X,
+  WalletCards,
+  Calendar,
+  Search
+} from 'lucide-react';
+
+// --- MOCK DATA AWAL ---
+const initialWallets = [
+  { id: 'w1', name: 'BCA Utama', type: 'Bank', initialBalance: 5000000 },
+  { id: 'w2', name: 'GoPay', type: 'E-Wallet', initialBalance: 150000 },
+  { id: 'w3', name: 'Uang Tunai', type: 'Cash', initialBalance: 300000 }
+];
+
+const initialCategories = [
+  { id: 'c1', type: 'expense', name: 'Makanan & Minuman' },
+  { id: 'c2', type: 'expense', name: 'Transportasi' },
+  { id: 'c3', type: 'expense', name: 'Tagihan & Utilitas' },
+  { id: 'c4', type: 'income', name: 'Gaji Bulanan' },
+  { id: 'c5', type: 'income', name: 'Bonus' }
+];
+
+const initialTransactions = [
+  { id: 't1', date: '2026-09-01', type: 'income', wallet_id: 'w1', category_id: 'c4', amount: 10000000, note: 'Gaji September' },
+  { id: 't2', date: '2026-09-01', type: 'expense', wallet_id: 'w2', category_id: 'c1', amount: 50000, note: 'Makan Siang' },
+  { id: 't3', date: '2026-09-02', type: 'transfer', wallet_id: 'w1', to_wallet_id: 'w2', amount: 500000, note: 'Topup GoPay' }
+];
+
+export default function App() {
+  // --- STATE MANAGEMENT ---
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [wallets, setWallets] = useState(initialWallets);
+  const [categories, setCategories] = useState(initialCategories);
+  const [transactions, setTransactions] = useState(initialTransactions);
+  
+  // Modal States
+  const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+  
+  // Format mata uang
+  const formatIDR = (number) => {
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number);
+  };
+
+  // --- KALKULASI KEUANGAN ---
+  const { walletBalances, totalBalance, totalIncome, totalExpense } = useMemo(() => {
+    let balances = {};
+    let tIncome = 0;
+    let tExpense = 0;
+
+    // Set saldo awal
+    wallets.forEach(w => {
+      balances[w.id] = { ...w, currentBalance: w.initialBalance };
+    });
+
+    // Hitung berdasarkan transaksi
+    transactions.forEach(tx => {
+      const amount = Number(tx.amount);
+      if (tx.type === 'income') {
+        if (balances[tx.wallet_id]) balances[tx.wallet_id].currentBalance += amount;
+        tIncome += amount;
+      } else if (tx.type === 'expense') {
+        if (balances[tx.wallet_id]) balances[tx.wallet_id].currentBalance -= amount;
+        tExpense += amount;
+      } else if (tx.type === 'transfer') {
+        if (balances[tx.wallet_id]) balances[tx.wallet_id].currentBalance -= amount;
+        if (balances[tx.to_wallet_id]) balances[tx.to_wallet_id].currentBalance += amount;
+      }
+    });
+
+    const total = Object.values(balances).reduce((sum, w) => sum + w.currentBalance, 0);
+
+    return { 
+      walletBalances: Object.values(balances), 
+      totalBalance: total,
+      totalIncome: tIncome,
+      totalExpense: tExpense
+    };
+  }, [wallets, transactions]);
+
+  // --- HANDLERS ---
+  const handleAddTransaction = (newTx) => {
+    setTransactions([{ ...newTx, id: `t${Date.now()}` }, ...transactions]);
+    setIsTxModalOpen(false);
+  };
+
+  // --- KOMPONEN UI ---
+  const Sidebar = () => (
+    <div className="w-64 bg-slate-900 text-slate-300 min-h-screen flex flex-col hidden md:flex">
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <WalletCards className="text-emerald-500" /> DompetKu
+        </h1>
+        <p className="text-xs mt-1 text-slate-500">Personal Finance Tracker</p>
+      </div>
+      <nav className="flex-1 px-4 space-y-2">
+        <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}>
+          <LayoutDashboard size={20} /> Dashboard
+        </button>
+        <button onClick={() => setActiveTab('transactions')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'transactions' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}>
+          <ArrowRightLeft size={20} /> Transaksi
+        </button>
+        <button onClick={() => setActiveTab('wallets')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'wallets' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}>
+          <Wallet size={20} /> Dompet
+        </button>
+        <button onClick={() => setActiveTab('categories')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${activeTab === 'categories' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}>
+          <Tags size={20} /> Kategori
+        </button>
+      </nav>
+    </div>
+  );
+
+  const MobileNav = () => (
+    <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center fixed bottom-0 w-full z-10">
+       <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center ${activeTab === 'dashboard' ? 'text-emerald-500' : 'text-slate-400'}`}>
+          <LayoutDashboard size={24} /><span className="text-[10px]">Dashboard</span>
+        </button>
+        <button onClick={() => setActiveTab('transactions')} className={`flex flex-col items-center ${activeTab === 'transactions' ? 'text-emerald-500' : 'text-slate-400'}`}>
+          <ArrowRightLeft size={24} /><span className="text-[10px]">Transaksi</span>
+        </button>
+        <button onClick={() => setActiveTab('wallets')} className={`flex flex-col items-center ${activeTab === 'wallets' ? 'text-emerald-500' : 'text-slate-400'}`}>
+          <Wallet size={24} /><span className="text-[10px]">Dompet</span>
+        </button>
+    </div>
+  );
+
+  const DashboardView = () => (
+    <div className="space-y-6 animate-in fade-in">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-4 opacity-10"><Wallet size={64} /></div>
+          <p className="text-slate-500 text-sm font-medium">Total Saldo (Semua Dompet)</p>
+          <h2 className="text-3xl font-bold text-slate-800 mt-2">{formatIDR(totalBalance)}</h2>
+        </div>
+        <div className="bg-emerald-50 p-6 rounded-2xl shadow-sm border border-emerald-100">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-emerald-600 text-sm font-medium">Total Pemasukan</p>
+              <h2 className="text-2xl font-bold text-emerald-700 mt-2">{formatIDR(totalIncome)}</h2>
+            </div>
+            <div className="bg-emerald-100 p-2 rounded-lg"><TrendingUp className="text-emerald-600" /></div>
+          </div>
+        </div>
+        <div className="bg-rose-50 p-6 rounded-2xl shadow-sm border border-rose-100">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-rose-600 text-sm font-medium">Total Pengeluaran</p>
+              <h2 className="text-2xl font-bold text-rose-700 mt-2">{formatIDR(totalExpense)}</h2>
+            </div>
+            <div className="bg-rose-100 p-2 rounded-lg"><TrendingDown className="text-rose-600" /></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Dompet List */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-slate-800">Dompet Saya</h3>
+            <button onClick={() => setActiveTab('wallets')} className="text-sm text-emerald-600 hover:underline">Lihat Semua</button>
+          </div>
+          <div className="space-y-4">
+            {walletBalances.map(w => (
+              <div key={w.id} className="flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className="bg-slate-100 p-2 rounded-lg"><Wallet className="text-slate-600" size={20} /></div>
+                  <div>
+                    <p className="font-medium text-slate-800">{w.name}</p>
+                    <p className="text-xs text-slate-500">{w.type}</p>
+                  </div>
+                </div>
+                <p className="font-bold text-slate-700">{formatIDR(w.currentBalance)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Transactions */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-slate-800">Transaksi Terakhir</h3>
+            <button onClick={() => setActiveTab('transactions')} className="text-sm text-emerald-600 hover:underline">Lihat Semua</button>
+          </div>
+          <div className="space-y-4">
+            {transactions.slice(0, 5).map(tx => {
+              const category = categories.find(c => c.id === tx.category_id);
+              const isTransfer = tx.type === 'transfer';
+              return (
+                <div key={tx.id} className="flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl transition-colors">
+                   <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${tx.type === 'income' ? 'bg-emerald-100' : tx.type === 'expense' ? 'bg-rose-100' : 'bg-blue-100'}`}>
+                      {tx.type === 'income' ? <TrendingUp size={20} className="text-emerald-600" /> : 
+                       tx.type === 'expense' ? <TrendingDown size={20} className="text-rose-600" /> : 
+                       <ArrowRightLeft size={20} className="text-blue-600" />}
+                    </div>
+                    <div>
+                      <p className="font-medium text-slate-800">{isTransfer ? 'Transfer' : category?.name || 'Lainnya'}</p>
+                      <p className="text-xs text-slate-500">{tx.note} • {tx.date}</p>
+                    </div>
+                  </div>
+                  <p className={`font-bold ${tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-blue-600'}`}>
+                    {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}{formatIDR(tx.amount)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const TransactionsView = () => {
+    const [filterType, setFilterType] = useState('all');
+    
+    const filteredTx = transactions.filter(tx => filterType === 'all' || tx.type === filterType);
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 animate-in fade-in">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+          <h2 className="text-xl font-bold text-slate-800">Riwayat Transaksi</h2>
+          <div className="flex gap-2 w-full md:w-auto">
+            <select 
+              className="bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-auto"
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+            >
+              <option value="all">Semua Jenis</option>
+              <option value="income">Pemasukan</option>
+              <option value="expense">Pengeluaran</option>
+              <option value="transfer">Transfer</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 text-sm border-b border-slate-200">
+                <th className="p-4 font-medium rounded-tl-xl">Tanggal</th>
+                <th className="p-4 font-medium">Keterangan</th>
+                <th className="p-4 font-medium">Kategori</th>
+                <th className="p-4 font-medium">Dompet (Asal)</th>
+                <th className="p-4 font-medium text-right rounded-tr-xl">Nominal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredTx.map(tx => {
+                const category = categories.find(c => c.id === tx.category_id);
+                const wallet = wallets.find(w => w.id === tx.wallet_id);
+                const toWallet = wallets.find(w => w.id === tx.to_wallet_id);
+                
+                return (
+                  <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="p-4 text-sm text-slate-600 whitespace-nowrap">{tx.date}</td>
+                    <td className="p-4">
+                      <p className="font-medium text-slate-800">{tx.note}</p>
+                      {tx.type === 'transfer' && <p className="text-xs text-blue-500 flex items-center gap-1 mt-1">Ke: {toWallet?.name} <ArrowRightLeft size={10}/></p>}
+                    </td>
+                    <td className="p-4 text-sm text-slate-600">
+                      {tx.type === 'transfer' ? <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs">Transfer</span> : 
+                       <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded text-xs">{category?.name}</span>}
+                    </td>
+                    <td className="p-4 text-sm text-slate-600">{wallet?.name}</td>
+                    <td className={`p-4 text-right font-bold whitespace-nowrap ${tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-blue-600'}`}>
+                      {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}{formatIDR(tx.amount)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          {filteredTx.length === 0 && (
+             <div className="text-center py-10 text-slate-500">Tidak ada transaksi ditemukan.</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // --- MODAL TAMBAH TRANSAKSI ---
+  const TransactionModal = () => {
+    if (!isTxModalOpen) return null;
+    
+    const [txType, setTxType] = useState('expense');
+    const [formData, setFormData] = useState({
+      date: new Date().toISOString().split('T')[0],
+      amount: '',
+      wallet_id: wallets[0]?.id || '',
+      to_wallet_id: wallets[1]?.id || '',
+      category_id: categories.find(c => c.type === 'expense')?.id || '',
+      note: ''
+    });
+
+    const filteredCategories = categories.filter(c => c.type === txType);
+
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      handleAddTransaction({
+        ...formData,
+        type: txType,
+        amount: Number(formData.amount)
+      });
+    };
+
+    return (
+      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="flex justify-between items-center p-6 border-b border-slate-100">
+            <h2 className="text-xl font-bold text-slate-800">Catat Transaksi</h2>
+            <button onClick={() => setIsTxModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
+          </div>
+          
+          <div className="p-6">
+            {/* Tipe Transaksi Tabs */}
+            <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+              <button type="button" onClick={() => setTxType('expense')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${txType === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Pengeluaran</button>
+              <button type="button" onClick={() => setTxType('income')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${txType === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Pemasukan</button>
+              <button type="button" onClick={() => setTxType('transfer')} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${txType === 'transfer' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Transfer</button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nominal (Rp)</label>
+                <input required type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} className="w-full border border-slate-200 rounded-xl px-4 py-3 text-lg font-bold focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none" placeholder="0" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal</label>
+                  <input required type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none" />
+                </div>
+                
+                {txType !== 'transfer' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Kategori</label>
+                    <select required value={formData.category_id} onChange={e => setFormData({...formData, category_id: e.target.value})} className="w-full border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none">
+                      {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className={txType === 'transfer' ? 'grid grid-cols-2 gap-4' : ''}>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">{txType === 'transfer' ? 'Dari Dompet' : 'Dompet'}</label>
+                  <select required value={formData.wallet_id} onChange={e => setFormData({...formData, wallet_id: e.target.value})} className="w-full border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none">
+                    {wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                </div>
+                
+                {txType === 'transfer' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Ke Dompet</label>
+                    <select required value={formData.to_wallet_id} onChange={e => setFormData({...formData, to_wallet_id: e.target.value})} className="w-full border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none">
+                      {wallets.filter(w => w.id !== formData.wallet_id).map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Keterangan</label>
+                <input required type="text" value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} className="w-full border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Cth: Beli Kopi" />
+              </div>
+
+              <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition-colors mt-4">
+                Simpan Transaksi
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- MAIN RENDER ---
+  return (
+    <div className="flex min-h-screen bg-slate-50 font-sans pb-16 md:pb-0">
+      <Sidebar />
+      
+      <main className="flex-1 overflow-y-auto">
+        {/* Header Mobile */}
+        <div className="md:hidden bg-white p-4 flex justify-between items-center shadow-sm border-b border-slate-100 sticky top-0 z-10">
+          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <WalletCards className="text-emerald-500" /> DompetKu
+          </h1>
+        </div>
+
+        {/* Topbar Desktop */}
+        <header className="hidden md:flex justify-between items-center bg-white p-6 border-b border-slate-100 shadow-sm">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-800 capitalize">{activeTab === 'dashboard' ? 'Ringkasan Keuangan' : activeTab}</h2>
+            <p className="text-sm text-slate-500">Kelola keuangan Anda dengan mudah.</p>
+          </div>
+          <button 
+            onClick={() => setIsTxModalOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <Plus size={20} /> Transaksi Baru
+          </button>
+        </header>
+
+        {/* Floating Action Button (Mobile) */}
+        <button 
+          onClick={() => setIsTxModalOpen(true)}
+          className="md:hidden fixed bottom-20 right-4 bg-emerald-600 text-white p-4 rounded-full shadow-lg hover:bg-emerald-700 transition-colors z-10"
+        >
+          <Plus size={24} />
+        </button>
+
+        {/* Content Area */}
+        <div className="p-4 md:p-6">
+          {activeTab === 'dashboard' && <DashboardView />}
+          {activeTab === 'transactions' && <TransactionsView />}
+          {activeTab === 'wallets' && (
+             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+               <h2 className="text-xl font-bold text-slate-800 mb-4">Manajemen Dompet</h2>
+               <p className="text-slate-500 mb-6">Di sini nantinya Anda bisa menambahkan dompet baru (Bank, E-Wallet, Tunai).</p>
+               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                 {walletBalances.map(w => (
+                   <div key={w.id} className="border border-slate-200 p-4 rounded-xl">
+                      <h3 className="font-bold text-lg text-slate-800">{w.name}</h3>
+                      <p className="text-sm text-slate-500 mb-3">{w.type}</p>
+                      <p className="text-xl font-bold text-emerald-600">{formatIDR(w.currentBalance)}</p>
+                   </div>
+                 ))}
+               </div>
+             </div>
+          )}
+          {activeTab === 'categories' && (
+             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+               <h2 className="text-xl font-bold text-slate-800 mb-4">Kategori Transaksi</h2>
+               <p className="text-slate-500 mb-6">Manajemen kategori pemasukan dan pengeluaran Anda.</p>
+               <div className="space-y-2">
+                 {categories.map(c => (
+                   <div key={c.id} className="flex items-center gap-3 p-3 border border-slate-100 rounded-xl">
+                      <div className={`p-2 rounded-lg ${c.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                        <Tags size={16} />
+                      </div>
+                      <span className="font-medium text-slate-700">{c.name}</span>
+                      <span className="ml-auto text-xs uppercase tracking-wider text-slate-400 font-bold">{c.type}</span>
+                   </div>
+                 ))}
+               </div>
+             </div>
+          )}
+        </div>
+      </main>
+
+      <MobileNav />
+      <TransactionModal />
+    </div>
+  );
+}

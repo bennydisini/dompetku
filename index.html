@@ -19,7 +19,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
-    /* Styling tambahan untuk animasi dan perbaikan visual */
+    /* Styling Animasi & UI */
     @keyframes slideUpFade {
       from { opacity: 0; transform: translateY(20px) scale(0.98); }
       to { opacity: 1; transform: translateY(0) scale(1); }
@@ -38,25 +38,25 @@
 
     body { 
       font-family: 'Inter', sans-serif; 
-      background-color: #f8fafc; /* slate-50 */
-      -webkit-tap-highlight-color: transparent; /* Hilangkan efek tap biru di mobile */
+      background-color: #f8fafc;
+      -webkit-tap-highlight-color: transparent;
     }
     
-    /* Efek glassmorphism untuk header mobile */
     .glass-header {
       background: rgba(255, 255, 255, 0.85);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
     }
     
-    /* Sembunyikan scrollbar bawaan agar tabel lebih rapi di desktop */
-    .no-scrollbar::-webkit-scrollbar {
-      display: none;
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* Custom Toast Animation */
+    @keyframes toast-in-right {
+        from { transform: translateX(100%); }
+        to { transform: translateX(0); }
     }
-    .no-scrollbar {
-      -ms-overflow-style: none;
-      scrollbar-width: none;
-    }
+    .toast-enter { animation: toast-in-right 0.3s ease-out forwards; }
   </style>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -64,11 +64,103 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useMemo, useEffect } = React;
+    const { useState, useMemo, useEffect, useRef } = React;
 
-    // Komponen Ikon yang sudah diperbaiki menggunakan API Resmi Lucide
-    const IconWrapper = ({ name, size = 24, className = "" }) => {
-      const iconRef = React.useRef(null);
+    // ==========================================
+    // 1. KONFIGURASI GLOBAL & API GATEWAY
+    // ==========================================
+    const IS_PREVIEW = true; // Ubah ke false jika Anda sudah menggunakan GAS_URL asli dan mendeploy ke Github/Hosting
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyJCGFJTjnt-yzJ2Uj6bR3obyBUBTCdonedjURBa3XakmLcHlxTOdby70oydWwQ2J3Q7w/exec"; 
+
+    // API Gateway untuk komunikasi Frontend <-> Backend (Dual-Mode)
+    async function apiCall(action, payload = {}) {
+      if (IS_PREVIEW) {
+        return await handleMockAPI(action, payload);
+      }
+
+      if(!GAS_URL || GAS_URL.includes("ISI_DENGAN_URL")) {
+          return { status: "error", message: "URL Database belum disetting. Silakan isi GAS_URL di kode sumber."};
+      }
+
+      try {
+        const res = await fetch(GAS_URL, {
+          method: "POST",
+          redirect: "follow",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action, payload })
+        });
+        return await res.json();
+      } catch (err) {
+        console.error("API Call Error:", err);
+        console.warn("Fetch gagal (Mungkin CORS atau URL belum aktif). Beralih ke mode Preview...");
+        // Fallback otomatis ke Mock API agar aplikasi tidak crash
+        return await handleMockAPI(action, payload);
+      }
+    }
+
+    // --- MOCK ENGINE (Untuk Preview di Canvas/Lokal) ---
+    const MOCK_DELAY = 600; // Simulasi loading network
+    const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
+    async function handleMockAPI(action, payload) {
+        await delay(MOCK_DELAY);
+        
+        // Inisialisasi Mock DB pertama kali di localStorage
+        if (!localStorage.getItem('dompetku_mock_db')) {
+            localStorage.setItem('dompetku_mock_db', JSON.stringify({
+                users: [{ id: 'u1', username: 'admin', password: 'admin123' }],
+                wallets: [
+                    { id: 'w1', user_id: 'u1', name: 'BCA Utama', type: 'Bank', initial_balance: 5000000 },
+                    { id: 'w2', user_id: 'u1', name: 'GoPay', type: 'E-Wallet', initial_balance: 150000 }
+                ],
+                categories: [
+                    { id: 'c1', user_id: 'u1', type: 'expense', name: 'Makanan & Minuman' },
+                    { id: 'c2', user_id: 'u1', type: 'expense', name: 'Transportasi' },
+                    { id: 'c3', user_id: 'u1', type: 'income', name: 'Gaji Bulanan' }
+                ],
+                transactions: [
+                    { id: 't1', user_id: 'u1', date: new Date().toLocaleDateString('en-CA'), type: 'income', wallet_id: 'w1', category_id: 'c3', amount: 15000000, note: 'Saldo Awal Dummy' }
+                ]
+            }));
+        }
+
+        let db = JSON.parse(localStorage.getItem('dompetku_mock_db'));
+
+        switch (action) {
+            case 'login':
+                const user = db.users.find(u => u.username === payload.username && u.password === payload.password);
+                if (user) {
+                    const { password, ...safeUser } = user;
+                    return { status: 'success', message: 'Login berhasil (Mock Mode)', data: safeUser };
+                }
+                return { status: 'error', message: 'Username atau password salah' };
+
+            case 'getAll':
+                const userId = payload.user_id;
+                return {
+                    status: 'success',
+                    data: {
+                        wallets: db.wallets.filter(w => w.user_id === userId),
+                        categories: db.categories.filter(c => c.user_id === userId),
+                        transactions: db.transactions.filter(t => t.user_id === userId).sort((a,b) => new Date(b.date) - new Date(a.date))
+                    }
+                };
+
+            case 'create':
+                const newRecord = { ...payload.record, id: `mock_${Date.now()}` };
+                if (!db[payload.table]) db[payload.table] = [];
+                db[payload.table].push(newRecord);
+                localStorage.setItem('dompetku_mock_db', JSON.stringify(db));
+                return { status: 'success', data: newRecord };
+
+            default:
+                return { status: 'error', message: 'Action tidak didukung di Mock API' };
+        }
+    }
+
+    // Komponen Ikon (Lucide)
+    const IconWrapper = ({ name, size = 24, className = "", strokeWidth = 2 }) => {
+      const iconRef = useRef(null);
       
       useEffect(() => {
         if (iconRef.current) {
@@ -81,58 +173,162 @@
                 width: size,
                 height: size,
                 stroke: 'currentColor',
-                'stroke-width': '2',
+                'stroke-width': strokeWidth,
                 'stroke-linecap': 'round',
                 'stroke-linejoin': 'round'
               }
             });
           }
         }
-      }, [name, size, className]);
+      }, [name, size, className, strokeWidth]);
 
       return <span ref={iconRef} className={`inline-flex items-center justify-center ${className}`}></span>;
     };
 
-    // --- MOCK DATA AWAL ---
-    const initialWallets = [
-      { id: 'w1', name: 'BCA Utama', type: 'Bank', initialBalance: 5000000 },
-      { id: 'w2', name: 'GoPay', type: 'E-Wallet', initialBalance: 150000 },
-      { id: 'w3', name: 'Uang Tunai', type: 'Cash', initialBalance: 300000 }
-    ];
+    // Komponen Toast Notifikasi
+    const Toast = ({ message, type, onClose }) => {
+        if (!message) return null;
+        
+        const bgColor = type === 'success' ? 'bg-emerald-600' : type === 'error' ? 'bg-rose-600' : 'bg-slate-800';
+        const iconName = type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info';
 
-    const initialCategories = [
-      { id: 'c1', type: 'expense', name: 'Makanan & Minuman' },
-      { id: 'c2', type: 'expense', name: 'Transportasi' },
-      { id: 'c3', type: 'expense', name: 'Tagihan & Utilitas' },
-      { id: 'c4', type: 'income', name: 'Gaji Bulanan' },
-      { id: 'c5', type: 'income', name: 'Bonus' }
-    ];
+        return (
+            <div className={`fixed top-4 right-4 ${bgColor} text-white px-5 py-3.5 rounded-2xl shadow-xl flex items-center gap-3 z-[200] toast-enter`}>
+                <IconWrapper name={iconName} size={20} className="text-white/80" />
+                <span className="font-semibold text-sm">{message}</span>
+                <button onClick={onClose} className="ml-2 hover:bg-white/20 rounded-full p-1 transition-colors">
+                    <IconWrapper name="x" size={16} />
+                </button>
+            </div>
+        );
+    };
 
-    const initialTransactions = [
-      { id: 't1', date: '2026-09-01', type: 'income', wallet_id: 'w1', category_id: 'c4', amount: 10000000, note: 'Gaji September' },
-      { id: 't2', date: '2026-09-01', type: 'expense', wallet_id: 'w2', category_id: 'c1', amount: 50000, note: 'Makan Siang' },
-      { id: 't3', date: '2026-09-02', type: 'transfer', wallet_id: 'w1', to_wallet_id: 'w2', amount: 500000, note: 'Topup GoPay' }
-    ];
 
-    // --- MAIN APP COMPONENT ---
+    // ==========================================
+    // 2. KOMPONEN UTAMA (APP)
+    // ==========================================
     function App() {
+      // State Autentikasi
+      const [user, setUser] = useState(null);
+      const [isCheckingSession, setIsCheckingSession] = useState(true);
+
+      // State Data Aplikasi
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [wallets, setWallets] = useState(initialWallets);
-      const [categories, setCategories] = useState(initialCategories);
-      const [transactions, setTransactions] = useState(initialTransactions);
-      const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+      const [wallets, setWallets] = useState([]);
+      const [categories, setCategories] = useState([]);
+      const [transactions, setTransactions] = useState([]);
       
-      const formatIDR = (number) => {
-        return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number);
+      // State UI / Interaksi
+      const [isLoading, setIsLoading] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+
+      // Utility Fungsi
+      const formatIDR = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
+      
+      const showToast = (message, type = 'success') => {
+          setToast({ message, type });
+          setTimeout(() => setToast(null), 4000); // Hilang dalam 4 detik
       };
 
+      // ----------------------------------------
+      // LIFECYCLE: Cek Sesi Login & Sinkronisasi
+      // ----------------------------------------
+      useEffect(() => {
+        const savedSession = localStorage.getItem('dompetku_user_session');
+        if (savedSession) {
+            try {
+                const userData = JSON.parse(savedSession);
+                setUser(userData);
+                fetchInitialData(userData.id); // Tarik data jika ada sesi
+            } catch (e) {
+                console.error("Invalid session data");
+                localStorage.removeItem('dompetku_user_session');
+            }
+        }
+        setIsCheckingSession(false);
+      }, []);
+
+      const fetchInitialData = async (userId) => {
+          setIsLoading(true);
+          const response = await apiCall('getAll', { user_id: userId });
+          if (response.status === 'success') {
+              setWallets(response.data.wallets || []);
+              setCategories(response.data.categories || []);
+              setTransactions(response.data.transactions || []);
+          } else {
+              showToast(response.message, 'error');
+          }
+          setIsLoading(false);
+      };
+
+      // ----------------------------------------
+      // HANDLER: Login & Logout
+      // ----------------------------------------
+      const handleLogin = async (e) => {
+          e.preventDefault();
+          setIsLoading(true);
+          const username = e.target.username.value;
+          const password = e.target.password.value;
+
+          const response = await apiCall('login', { username, password });
+          
+          if (response.status === 'success') {
+              const userData = response.data;
+              localStorage.setItem('dompetku_user_session', JSON.stringify(userData));
+              setUser(userData);
+              showToast('Login berhasil! Mengambil data...');
+              await fetchInitialData(userData.id);
+          } else {
+              showToast(response.message, 'error');
+          }
+          setIsLoading(false);
+      };
+
+      const handleLogout = () => {
+          localStorage.removeItem('dompetku_user_session');
+          setUser(null);
+          setWallets([]);
+          setCategories([]);
+          setTransactions([]);
+          setActiveTab('dashboard');
+      };
+
+      // ----------------------------------------
+      // HANDLER: Tambah Data (Transaksi Baru)
+      // ----------------------------------------
+      const handleAddTransaction = async (newTx) => {
+        setIsLoading(true);
+        // Persiapkan payload sesuai struktur sheet
+        const payloadRecord = {
+            ...newTx,
+            user_id: user.id
+        };
+
+        const response = await apiCall('create', { table: 'transactions', record: payloadRecord });
+        
+        if (response.status === 'success') {
+            // Update state lokal untuk UX cepat tanpa harus fetch semua lagi
+            setTransactions([response.data, ...transactions].sort((a,b) => new Date(b.date) - new Date(a.date)));
+            showToast('Transaksi berhasil ditambahkan!');
+            setIsTxModalOpen(false);
+        } else {
+            showToast('Gagal: ' + response.message, 'error');
+        }
+        setIsLoading(false);
+      };
+
+
+      // ----------------------------------------
+      // KALKULASI KEUANGAN (Dinamis dari state)
+      // ----------------------------------------
       const { walletBalances, totalBalance, totalIncome, totalExpense } = useMemo(() => {
         let balances = {};
         let tIncome = 0;
         let tExpense = 0;
 
         wallets.forEach(w => {
-          balances[w.id] = { ...w, currentBalance: w.initialBalance };
+          balances[w.id] = { ...w, currentBalance: Number(w.initial_balance) || 0 };
         });
 
         transactions.forEach(tx => {
@@ -159,18 +355,68 @@
         };
       }, [wallets, transactions]);
 
-      const handleAddTransaction = (newTx) => {
-        setTransactions([{ ...newTx, id: `t${Date.now()}` }, ...transactions]);
-        setIsTxModalOpen(false);
-      };
 
+      // ==========================================
+      // VIEW: LOGIN SCREEN
+      // ==========================================
+      if (isCheckingSession) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><IconWrapper name="loader-2" className="animate-spin text-emerald-500" size={40} /></div>;
+
+      if (!user) {
+          return (
+              <div className="min-h-screen bg-[#F1F5F9] flex flex-col items-center justify-center p-4">
+                  <div className="bg-white p-8 sm:p-10 rounded-3xl shadow-xl w-full max-w-md animate-slide-up border border-slate-100">
+                      <div className="flex justify-center mb-6">
+                           <div className="bg-emerald-50 text-emerald-600 p-4 rounded-2xl shadow-sm">
+                              <IconWrapper name="wallet-cards" size={48} strokeWidth={1.5} />
+                           </div>
+                      </div>
+                      <h1 className="text-3xl font-extrabold text-center text-slate-800 mb-2 tracking-tight">DompetKu</h1>
+                      <p className="text-center text-slate-500 mb-8 font-medium">Masuk untuk mengelola keuangan Anda.</p>
+                      
+                      <form onSubmit={handleLogin} className="space-y-5">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username</label>
+                              <div className="relative">
+                                  <IconWrapper name="user" size={18} className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                                  <input type="text" name="username" required defaultValue="admin"
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3.5 text-slate-800 font-medium focus:ring-2 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-300" 
+                                      placeholder="Ketik username Anda" />
+                              </div>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label>
+                              <div className="relative">
+                                  <IconWrapper name="lock" size={18} className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                                  <input type="password" name="password" required defaultValue="admin123"
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3.5 text-slate-800 font-medium focus:ring-2 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-300" 
+                                      placeholder="Ketik password Anda" />
+                              </div>
+                          </div>
+                          <button type="submit" disabled={isLoading} 
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-4 px-4 rounded-xl transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-70 disabled:active:scale-100">
+                              {isLoading ? <IconWrapper name="loader-2" className="animate-spin" /> : 'Masuk Sekarang'}
+                          </button>
+                      </form>
+                      <p className="text-center text-xs text-slate-400 mt-6 font-medium">Gunakan 'admin' dan 'admin123' untuk demo.</p>
+                  </div>
+                  {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+              </div>
+          );
+      }
+
+      // ==========================================
+      // KUMPULAN SUB-KOMPONEN UI
+      // ==========================================
+      
       const Sidebar = () => (
-        <div className="w-64 bg-[#0B1120] text-slate-300 min-h-screen hidden md:flex flex-col fixed h-full shadow-2xl z-50">
+        <div className="w-64 bg-[#0B1120] text-slate-300 min-h-screen hidden md:flex flex-col fixed h-full shadow-2xl z-40">
           <div className="p-6">
             <h1 className="text-2xl font-extrabold text-white flex items-center gap-2">
               <IconWrapper name="wallet-cards" className="text-emerald-400" /> DompetKu
             </h1>
-            <p className="text-[11px] mt-1 text-slate-500 uppercase tracking-widest font-semibold">Finance Tracker</p>
+            <p className="text-[11px] mt-1 text-slate-500 uppercase tracking-widest font-semibold flex items-center gap-1">
+               <IconWrapper name="shield-check" size={12} className="text-emerald-500" /> {user.username}
+            </p>
           </div>
           <nav className="flex-1 px-4 space-y-1.5 mt-4">
             <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all font-medium ${activeTab === 'dashboard' ? 'bg-emerald-500/10 text-emerald-400' : 'hover:bg-slate-800/50 hover:text-white text-slate-400'}`}>
@@ -186,11 +432,16 @@
               <IconWrapper name="tags" size={20} /> Kategori
             </button>
           </nav>
+          <div className="p-4 mt-auto">
+             <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all font-medium text-slate-400 hover:text-rose-400 hover:bg-rose-500/10">
+                <IconWrapper name="log-out" size={18} /> Keluar
+             </button>
+          </div>
         </div>
       );
 
       const MobileNav = () => (
-        <div className="md:hidden bg-white text-slate-500 p-2 flex justify-around items-center fixed bottom-0 w-full z-40 border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] safe-area-pb">
+        <div className="md:hidden bg-white text-slate-500 p-2 flex justify-around items-center fixed bottom-0 w-full z-40 border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] pb-safe">
            <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center p-2 rounded-xl w-1/4 transition-colors ${activeTab === 'dashboard' ? 'text-emerald-600 font-medium' : 'hover:text-slate-800'}`}>
               <IconWrapper name="layout-dashboard" size={22} className="mb-1" />
               <span className="text-[10px]">Home</span>
@@ -203,50 +454,55 @@
               <IconWrapper name="wallet" size={22} className="mb-1" />
               <span className="text-[10px]">Dompet</span>
             </button>
+            <button onClick={handleLogout} className="flex flex-col items-center p-2 rounded-xl w-1/4 transition-colors hover:text-rose-500 text-slate-400">
+              <IconWrapper name="log-out" size={22} className="mb-1" />
+              <span className="text-[10px]">Keluar</span>
+            </button>
         </div>
       );
 
       const DashboardView = () => (
         <div className="space-y-6 animate-fade-in">
-          {/* Summary Cards */}
+          {isLoading && <div className="text-sm font-medium text-slate-500 flex items-center gap-2 mb-4 bg-slate-200/50 w-max px-3 py-1.5 rounded-lg"><IconWrapper name="loader-2" className="animate-spin" size={14}/> Sinkronisasi Data...</div>}
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
             <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-3xl shadow-lg relative overflow-hidden text-white">
               <div className="absolute -top-4 -right-4 p-4 opacity-10 transform rotate-12">
                 <IconWrapper name="wallet" size={100} />
               </div>
               <p className="text-slate-300 text-sm font-medium mb-1 relative z-10">Total Saldo (Semua Dompet)</p>
-              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight relative z-10">{formatIDR(totalBalance)}</h2>
+              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight relative z-10 break-words">{formatIDR(totalBalance)}</h2>
             </div>
             
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-md transition-shadow">
               <div>
-                <p className="text-slate-500 text-sm font-medium mb-1">Total Pemasukan</p>
-                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{formatIDR(totalIncome)}</h2>
+                <p className="text-slate-500 text-sm font-medium mb-1">Pemasukan Global</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight break-words">{formatIDR(totalIncome)}</h2>
               </div>
-              <div className="bg-emerald-50 p-3 rounded-2xl group-hover:scale-110 transition-transform">
-                <IconWrapper name="trending-up" className="text-emerald-600" size={28} />
+              <div className="bg-emerald-50 p-3 rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0 ml-2">
+                <IconWrapper name="trending-up" className="text-emerald-600" size={28} strokeWidth={2.5}/>
               </div>
             </div>
             
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between group hover:shadow-md transition-shadow">
               <div>
-                <p className="text-slate-500 text-sm font-medium mb-1">Total Pengeluaran</p>
-                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{formatIDR(totalExpense)}</h2>
+                <p className="text-slate-500 text-sm font-medium mb-1">Pengeluaran Global</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight break-words">{formatIDR(totalExpense)}</h2>
               </div>
-              <div className="bg-rose-50 p-3 rounded-2xl group-hover:scale-110 transition-transform">
-                <IconWrapper name="trending-down" className="text-rose-600" size={28} />
+              <div className="bg-rose-50 p-3 rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0 ml-2">
+                <IconWrapper name="trending-down" className="text-rose-600" size={28} strokeWidth={2.5}/>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Wallet List */}
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col min-h-[300px]">
               <div className="flex justify-between items-center p-6 border-b border-slate-50">
-                <h3 className="text-lg font-bold text-slate-800">Dompet Saya</h3>
-                <button onClick={() => setActiveTab('wallets')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">Lihat Semua</button>
+                <h3 className="text-lg font-bold text-slate-800">Saldo per Dompet</h3>
+                <button onClick={() => setActiveTab('wallets')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">Kelola</button>
               </div>
               <div className="p-4 space-y-2 flex-1">
+                {walletBalances.length === 0 && !isLoading && <p className="text-slate-400 text-center text-sm py-10">Belum ada dompet terdaftar.</p>}
                 {walletBalances.map(w => (
                   <div key={w.id} className="flex justify-between items-center p-4 hover:bg-slate-50 rounded-2xl transition-colors border border-transparent hover:border-slate-100 cursor-default">
                     <div className="flex items-center gap-4">
@@ -264,30 +520,30 @@
               </div>
             </div>
 
-            {/* Recent Transactions */}
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col min-h-[300px]">
               <div className="flex justify-between items-center p-6 border-b border-slate-50">
                 <h3 className="text-lg font-bold text-slate-800">Transaksi Terakhir</h3>
                 <button onClick={() => setActiveTab('transactions')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">Lihat Semua</button>
               </div>
               <div className="p-4 space-y-2 flex-1">
+                {transactions.length === 0 && !isLoading && <p className="text-slate-400 text-center text-sm py-10">Belum ada catatan transaksi.</p>}
                 {transactions.slice(0, 5).map(tx => {
-                  const category = categories.find(c => c.id === tx.category_id);
+                  const category = categories.find(c => String(c.id) === String(tx.category_id));
                   const isTransfer = tx.type === 'transfer';
                   return (
                     <div key={tx.id} className="flex justify-between items-center p-4 hover:bg-slate-50 rounded-2xl transition-colors border border-transparent hover:border-slate-100 cursor-default">
-                       <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-xl ${tx.type === 'income' ? 'bg-emerald-100' : tx.type === 'expense' ? 'bg-rose-100' : 'bg-blue-100'}`}>
+                       <div className="flex items-center gap-4 max-w-[60%]">
+                        <div className={`p-3 rounded-xl flex-shrink-0 ${tx.type === 'income' ? 'bg-emerald-100' : tx.type === 'expense' ? 'bg-rose-100' : 'bg-blue-100'}`}>
                           {tx.type === 'income' ? <IconWrapper name="trending-up" size={22} className="text-emerald-600" /> : 
                            tx.type === 'expense' ? <IconWrapper name="trending-down" size={22} className="text-rose-600" /> : 
                            <IconWrapper name="arrow-right-left" size={22} className="text-blue-600" />}
                         </div>
-                        <div>
-                          <p className="font-bold text-slate-800">{isTransfer ? 'Transfer Saldo' : category?.name || 'Lainnya'}</p>
-                          <p className="text-xs font-medium text-slate-500 mt-0.5">{tx.note} • {tx.date}</p>
+                        <div className="truncate">
+                          <p className="font-bold text-slate-800 truncate">{isTransfer ? 'Transfer Saldo' : category?.name || 'Kategori Dihapus'}</p>
+                          <p className="text-xs font-medium text-slate-500 mt-0.5 truncate">{tx.note} • {new Date(tx.date).toLocaleDateString('id-ID', {day: 'numeric', month:'short'})}</p>
                         </div>
                       </div>
-                      <p className={`font-bold tracking-tight ${tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-slate-700'}`}>
+                      <p className={`font-bold tracking-tight whitespace-nowrap ${tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-slate-700'}`}>
                         {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}{formatIDR(tx.amount)}
                       </p>
                     </div>
@@ -306,11 +562,14 @@
         return (
           <div className="bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col animate-fade-in overflow-hidden">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-6 border-b border-slate-100 gap-4 bg-white z-10 relative">
-              <h2 className="text-xl font-bold text-slate-800">Riwayat Transaksi</h2>
+              <div className="flex items-center gap-3">
+                  {isLoading && <IconWrapper name="loader-2" className="animate-spin text-emerald-500" size={20}/>}
+                  <h2 className="text-xl font-bold text-slate-800">Riwayat Transaksi</h2>
+              </div>
               <div className="flex gap-2 w-full sm:w-auto relative">
-                <IconWrapper name="filter" size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                <IconWrapper name="filter" size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <select 
-                  className="bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white w-full sm:w-auto appearance-none transition-colors"
+                  className="bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white w-full sm:w-auto appearance-none transition-colors cursor-pointer"
                   value={filterType}
                   onChange={(e) => setFilterType(e.target.value)}
                 >
@@ -335,27 +594,27 @@
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {filteredTx.map(tx => {
-                    const category = categories.find(c => c.id === tx.category_id);
-                    const wallet = wallets.find(w => w.id === tx.wallet_id);
-                    const toWallet = wallets.find(w => w.id === tx.to_wallet_id);
+                    const category = categories.find(c => String(c.id) === String(tx.category_id));
+                    const wallet = wallets.find(w => String(w.id) === String(tx.wallet_id));
+                    const toWallet = wallets.find(w => String(w.id) === String(tx.to_wallet_id));
                     
                     return (
                       <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors group">
-                        <td className="p-5 text-slate-500 whitespace-nowrap font-medium">{tx.date}</td>
+                        <td className="p-5 text-slate-500 whitespace-nowrap font-medium">{new Date(tx.date).toLocaleDateString('id-ID', {day: '2-digit', month: 'long', year: 'numeric'})}</td>
                         <td className="p-5">
                           <p className="font-bold text-slate-800">{tx.note}</p>
                           {tx.type === 'transfer' && (
                             <p className="text-xs font-medium text-blue-600 flex items-center gap-1.5 mt-1 bg-blue-50 inline-flex px-2 py-0.5 rounded-md">
-                              Ke: {toWallet?.name} <IconWrapper name="arrow-right" size={12}/>
+                              Ke: {toWallet?.name || 'Dompet Terhapus'} <IconWrapper name="arrow-right" size={12}/>
                             </p>
                           )}
                         </td>
                         <td className="p-5">
                           {tx.type === 'transfer' ? 
                             <span className="bg-slate-100 text-slate-600 font-medium px-2.5 py-1 rounded-lg text-xs flex w-max items-center gap-1.5"><IconWrapper name="arrow-right-left" size={12}/>Transfer</span> : 
-                            <span className="bg-slate-100 text-slate-600 font-medium px-2.5 py-1 rounded-lg text-xs flex w-max items-center gap-1.5"><IconWrapper name="tag" size={12}/>{category?.name}</span>}
+                            <span className="bg-slate-100 text-slate-600 font-medium px-2.5 py-1 rounded-lg text-xs flex w-max items-center gap-1.5"><IconWrapper name="tag" size={12}/>{category?.name || '-'}</span>}
                         </td>
-                        <td className="p-5 text-slate-600 font-medium">{wallet?.name}</td>
+                        <td className="p-5 text-slate-600 font-medium">{wallet?.name || '-'}</td>
                         <td className={`p-5 text-right font-bold whitespace-nowrap tracking-tight text-base ${tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-slate-800'}`}>
                           {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}{formatIDR(tx.amount)}
                         </td>
@@ -365,9 +624,9 @@
                 </tbody>
               </table>
               
-              {filteredTx.length === 0 && (
+              {filteredTx.length === 0 && !isLoading && (
                  <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                    <div className="bg-slate-50 p-4 rounded-full mb-3"><IconWrapper name="search-x" size={32} /></div>
+                    <div className="bg-slate-50 p-4 rounded-full mb-3"><IconWrapper name="search-x" size={32} strokeWidth={1.5} /></div>
                     <p className="font-medium text-slate-500">Tidak ada transaksi ditemukan.</p>
                  </div>
               )}
@@ -380,18 +639,32 @@
         if (!isTxModalOpen) return null;
         
         const [txType, setTxType] = useState('expense');
-        const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+        const todayStr = new Date().toLocaleDateString('en-CA'); 
         
         const [formData, setFormData] = useState({
           date: todayStr,
           amount: '',
-          wallet_id: wallets[0]?.id || '',
+          wallet_id: wallets.length > 0 ? wallets[0].id : '',
           to_wallet_id: wallets.length > 1 ? wallets[1].id : '',
           category_id: categories.find(c => c.type === 'expense')?.id || '',
           note: ''
         });
 
         const filteredCategories = categories.filter(c => c.type === txType);
+
+        // Jika dompet/kategori kosong, beri peringatan
+        if (wallets.length === 0) {
+            return (
+                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                    <div className="bg-white p-6 rounded-3xl max-w-sm w-full text-center">
+                        <IconWrapper name="alert-triangle" size={48} className="text-amber-500 mx-auto mb-4"/>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">Dompet Belum Dibuat</h3>
+                        <p className="text-slate-500 text-sm mb-6">Anda harus menambahkan dompet terlebih dahulu sebelum mencatat transaksi.</p>
+                        <button onClick={() => { setIsTxModalOpen(false); setActiveTab('wallets'); }} className="bg-slate-800 text-white w-full py-3 rounded-xl font-bold">Ke Menu Dompet</button>
+                    </div>
+                </div>
+            )
+        }
 
         const handleSubmit = (e) => {
           e.preventDefault();
@@ -407,7 +680,7 @@
             <div className="bg-white rounded-t-[32px] sm:rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-slide-up flex flex-col max-h-[90vh]">
               <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-white sticky top-0 z-10">
                 <h2 className="text-xl font-bold text-slate-800">Catat Transaksi</h2>
-                <button onClick={() => setIsTxModalOpen(false)} className="text-slate-400 hover:text-rose-500 bg-slate-50 hover:bg-rose-50 p-2 rounded-full transition-colors">
+                <button disabled={isLoading} onClick={() => setIsTxModalOpen(false)} className="text-slate-400 hover:text-rose-500 bg-slate-50 hover:bg-rose-50 p-2 rounded-full transition-colors disabled:opacity-50">
                    <IconWrapper name="x" size={20} />
                 </button>
               </div>
@@ -425,21 +698,24 @@
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nominal (Rp)</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 font-bold text-lg">Rp</span>
-                      <input required type="number" min="1" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-3.5 text-xl font-extrabold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all placeholder:text-slate-300" placeholder="0" />
+                      <input required type="number" min="1" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} disabled={isLoading}
+                        className="w-full bg-slate-50 focus:bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-3.5 text-xl font-extrabold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all placeholder:text-slate-300 disabled:opacity-70" placeholder="0" />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tanggal</label>
-                      <input required type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all" />
+                      <input required type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} disabled={isLoading}
+                        className="w-full bg-slate-50 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all disabled:opacity-70 cursor-pointer" />
                     </div>
                     
                     {txType !== 'transfer' && (
                       <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Kategori</label>
-                        <select required value={formData.category_id} onChange={e => setFormData({...formData, category_id: e.target.value})} className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none">
-                          <option value="" disabled>Pilih</option>
+                        <select required value={formData.category_id} onChange={e => setFormData({...formData, category_id: e.target.value})} disabled={isLoading}
+                          className="w-full bg-slate-50 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none cursor-pointer disabled:opacity-70">
+                          <option value="" disabled>Pilih Kategori</option>
                           {filteredCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </div>
@@ -449,7 +725,8 @@
                   <div className={txType === 'transfer' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : ''}>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{txType === 'transfer' ? 'Dari Dompet' : 'Sumber Dana'}</label>
-                      <select required value={formData.wallet_id} onChange={e => setFormData({...formData, wallet_id: e.target.value})} className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none">
+                      <select required value={formData.wallet_id} onChange={e => setFormData({...formData, wallet_id: e.target.value})} disabled={isLoading}
+                        className="w-full bg-slate-50 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none cursor-pointer disabled:opacity-70">
                         {wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                       </select>
                     </div>
@@ -457,9 +734,10 @@
                     {txType === 'transfer' && (
                       <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Ke Dompet</label>
-                        <select required value={formData.to_wallet_id} onChange={e => setFormData({...formData, to_wallet_id: e.target.value})} className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none">
+                        <select required value={formData.to_wallet_id} onChange={e => setFormData({...formData, to_wallet_id: e.target.value})} disabled={isLoading}
+                          className="w-full bg-slate-50 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none cursor-pointer disabled:opacity-70">
                           <option value="" disabled>Pilih Tujuan</option>
-                          {wallets.filter(w => w.id !== formData.wallet_id).map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                          {wallets.filter(w => String(w.id) !== String(formData.wallet_id)).map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                         </select>
                       </div>
                     )}
@@ -467,11 +745,13 @@
 
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Catatan</label>
-                    <input required type="text" value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} className="w-full bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-400" placeholder="Contoh: Makan siang bareng teman" />
+                    <input required type="text" value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} disabled={isLoading}
+                      className="w-full bg-slate-50 focus:bg-white border border-slate-200 rounded-2xl px-4 py-3 font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-400 disabled:opacity-70" placeholder="Contoh: Makan siang bareng teman" />
                   </div>
 
-                  <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-4 px-4 rounded-2xl transition-all mt-6 shadow-lg shadow-emerald-600/30 active:scale-[0.98]">
-                    Simpan Transaksi
+                  <button type="submit" disabled={isLoading}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-4 px-4 rounded-2xl transition-all mt-6 shadow-lg shadow-emerald-600/30 active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-70 disabled:active:scale-100">
+                    {isLoading ? <IconWrapper name="loader-2" className="animate-spin" /> : 'Simpan Transaksi'}
                   </button>
                 </form>
               </div>
@@ -482,6 +762,7 @@
 
       return (
         <div className="flex min-h-screen bg-[#F1F5F9] font-sans md:pl-64">
+          {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
           <Sidebar />
           
           <main className="flex-1 w-full pb-24 md:pb-8 flex flex-col min-h-screen">
@@ -498,7 +779,10 @@
             {/* Header Desktop */}
             <header className="hidden md:flex justify-between items-center p-8 bg-[#F1F5F9] sticky top-0 z-30">
               <div>
-                <h2 className="text-3xl font-extrabold text-slate-800 capitalize tracking-tight">{activeTab === 'dashboard' ? 'Ringkasan Keuangan' : activeTab}</h2>
+                <h2 className="text-3xl font-extrabold text-slate-800 capitalize tracking-tight flex items-center gap-3">
+                  {activeTab === 'dashboard' ? 'Ringkasan Keuangan' : activeTab}
+                  {isLoading && <IconWrapper name="loader-2" className="animate-spin text-emerald-500" size={24}/>}
+                </h2>
                 <p className="text-sm font-medium text-slate-500 mt-1">Kelola pencatatan keuangan harian Anda dengan mudah.</p>
               </div>
               <button 
@@ -523,13 +807,20 @@
               {activeTab === 'transactions' && <TransactionsView />}
               
               {activeTab === 'wallets' && (
-                 <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8 animate-fade-in">
-                   <div className="flex items-center gap-3 mb-2">
-                     <div className="bg-emerald-100 text-emerald-600 p-2 rounded-xl"><IconWrapper name="wallet" size={24} /></div>
-                     <h2 className="text-2xl font-bold text-slate-800">Manajemen Dompet</h2>
+                 <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8 animate-fade-in max-w-5xl">
+                   <div className="flex items-center justify-between mb-8">
+                     <div>
+                       <div className="flex items-center gap-3 mb-2">
+                         <div className="bg-emerald-100 text-emerald-600 p-2 rounded-xl"><IconWrapper name="wallet" size={24} /></div>
+                         <h2 className="text-2xl font-bold text-slate-800">Manajemen Dompet</h2>
+                       </div>
+                       <p className="text-slate-500 font-medium">Daftar sumber dana yang Anda miliki saat ini.</p>
+                     </div>
+                     {isLoading && <IconWrapper name="loader-2" className="animate-spin text-emerald-500" size={24}/>}
                    </div>
-                   <p className="text-slate-500 font-medium mb-8">Daftar sumber dana yang Anda miliki saat ini.</p>
+
                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                     {walletBalances.length === 0 && !isLoading && <p className="text-slate-400 col-span-full">Belum ada dompet. (Fitur tambah dompet menyusul di panel Admin/Pengaturan)</p>}
                      {walletBalances.map(w => (
                        <div key={w.id} className="border border-slate-200 bg-slate-50/50 p-6 rounded-2xl hover:shadow-md transition-shadow hover:border-emerald-200 group relative overflow-hidden">
                           <div className="absolute -bottom-4 -right-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity transform group-hover:scale-110">
@@ -548,12 +839,19 @@
               
               {activeTab === 'categories' && (
                  <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8 animate-fade-in max-w-4xl">
-                   <div className="flex items-center gap-3 mb-2">
-                     <div className="bg-indigo-100 text-indigo-600 p-2 rounded-xl"><IconWrapper name="tags" size={24} /></div>
-                     <h2 className="text-2xl font-bold text-slate-800">Kategori Transaksi</h2>
+                   <div className="flex items-center justify-between mb-8">
+                       <div>
+                         <div className="flex items-center gap-3 mb-2">
+                           <div className="bg-indigo-100 text-indigo-600 p-2 rounded-xl"><IconWrapper name="tags" size={24} /></div>
+                           <h2 className="text-2xl font-bold text-slate-800">Kategori Transaksi</h2>
+                         </div>
+                         <p className="text-slate-500 font-medium">Klasifikasi untuk membedakan jenis pengeluaran dan pemasukan Anda.</p>
+                       </div>
+                       {isLoading && <IconWrapper name="loader-2" className="animate-spin text-emerald-500" size={24}/>}
                    </div>
-                   <p className="text-slate-500 font-medium mb-8">Klasifikasi untuk membedakan jenis pengeluaran dan pemasukan Anda.</p>
+                   
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     {categories.length === 0 && !isLoading && <p className="text-slate-400 col-span-full">Belum ada kategori. (Fitur tambah kategori menyusul)</p>}
                      {categories.map(c => (
                        <div key={c.id} className="flex items-center gap-4 p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 transition-colors cursor-default">
                           <div className={`p-3 rounded-xl shadow-sm ${c.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
